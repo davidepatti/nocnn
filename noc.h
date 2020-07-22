@@ -15,6 +15,10 @@ using namespace std;
 
 #define ROUTING_XY 1
 #define ROUTING_FA 2
+#define ROUTING_DELTA 3
+
+#define TOPOLOGY_MESH      1
+#define TOPOLOGY_BUTTERFLY 2
 
 #define LT_WIRED    1
 #define LT_WIRELESS 2
@@ -76,6 +80,7 @@ class NoC
  public:
 
   float        clock_frequency; // in Hz
+  int          topology;
   int          mesh_width, mesh_height;
   int          routing;
   int          local_memory_size; // in bytes
@@ -162,6 +167,7 @@ class NoC
 
   bool searchClock(ifstream& f, float& cf);
   bool searchNoCSize(ifstream& f, int& w, int& h);
+  bool searchTopology(ifstream& f, int& t);
   bool searchRouting(ifstream& f, int& ra);
   bool searchLocalMemory(ifstream& f, int& lms, double& epb, double& leakpwr);
   bool searchMainMemory(ifstream& f, float& bw, double& epb, double& leakpwr);
@@ -193,6 +199,7 @@ class NoC
   TPath getRoutingPathFA(int src_node, int dst_node);
   TPath getRoutingPathXYWired(int src_node, int dst_node);
   TPath getRoutingPathXYWireless(int src_node, int dst_node);
+  TPath getRoutingPathDELTA(int src_node, int dst_node);
 
   int closestMI(int node);
   pair<int,int> getClosestRHNode(int node);
@@ -207,6 +214,7 @@ class NoC
   void makeClosestMIMap();
 
   void makeLinks();
+  void makeDeltaLinks();
   void makeWiredLinks();
   void makeWirelessLinks();
   void makeGRSLinks();

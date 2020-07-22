@@ -2,6 +2,7 @@
 #include <iomanip>
 #include <climits>
 #include <cfloat>
+#include <cmath>
 #include "noc.h"
 
 
@@ -24,6 +25,35 @@ bool NoC::searchClock(ifstream& f, float& cf)
       getline(f, line);
       if (sscanf(line.c_str(), "clock: %f", &cf) == 1)
 	return true;
+    }
+
+  return false;
+}
+
+// ----------------------------------------------------------------------
+
+bool NoC::searchTopology(ifstream& f, int& t)
+{
+  char   str_t[32];
+
+  f.clear();
+  f.seekg(0, ios::beg);
+
+  string line;
+  while (!f.eof())
+    {
+      getline(f, line);
+      if (sscanf(line.c_str(), "topology: %s", str_t) == 1)
+      {
+        if (strcmp(str_t, "mesh") == 0)
+          t = TOPOLOGY_MESH;
+        else if (strcmp(str_t, "butterfly") == 0)
+          t = TOPOLOGY_BUTTERFLY;
+        else 
+          return false;
+
+        return true;
+      }
     }
 
   return false;
@@ -66,6 +96,8 @@ bool NoC::searchRouting(ifstream& f, int& ra)
 	    ra = ROUTING_XY;
 	  else if (strcmp(rstr, "fa") == 0)
 	    ra = ROUTING_FA;
+      else if (strcmp(rstr, "delta") == 0)
+        ra = ROUTING_DELTA;
 	  else
 	    return false;
 	  
@@ -80,6 +112,12 @@ bool NoC::searchRouting(ifstream& f, int& ra)
 
 bool NoC::searchNodeMapping(ifstream& f, int& nm)
 {
+  if (topology == TOPOLOGY_BUTTERFLY) 
+    {
+      nm = MAP_ZIGZAG;
+      return true;
+    }
+
   char rstr[256];
   
   f.clear();
@@ -437,6 +475,12 @@ bool NoC::loadNoC(const string& fname)
       return false;
     }
 
+  if (!searchTopology(f, topology))
+    {
+      cerr << "Unspecified topology or invalid format" << endl;
+      return false;
+    }
+
   if (!searchNoCSize(f, mesh_width, mesh_height))
     {
       cerr << "Unspecified NoC size or invalid format" << endl;
@@ -488,6 +532,9 @@ bool NoC::loadNoC(const string& fname)
   use_grslinks = searchGRSLinksUsage(f);
   if (use_grslinks)
     {
+      if (topology != TOPOLOGY_MESH)
+        cerr << "GRS link is currently supported only by mesh topologies";
+
       searchGRSLinksPositions(f, grslinks_pos);
       if (!grslinks_pos.empty())
 	if (!searchGRSLink(f, grslink_width, epb_grslink, leak_pwr_grslink))
@@ -502,6 +549,9 @@ bool NoC::loadNoC(const string& fname)
   use_winoc = searchWiNoCUsage(f);
   if (use_winoc)
     {
+      if (topology != TOPOLOGY_MESH)
+        cerr << "Wireless is currently supported only by mesh topologies";
+
       searchRadioHubs(f, radio_hubs);
       if (!radio_hubs.empty())
 	if (!searchWiNoCData(f, wireless_bandwidth, epb_wireless, leak_pwr_wireless))
@@ -520,7 +570,10 @@ bool NoC::loadNoC(const string& fname)
   makePE2Node(); // must call before makeLinks
   makeRH2Node(); // must call before makeLinks
 
-  makeLinks();
+  if (topology == TOPOLOGY_MESH)
+    makeLinks();
+  else if (topology == TOPOLOGY_BUTTERFLY)
+    makeDeltaLinks();
 
   makeClosestMIMap(); // must call after makePE2Node
 
@@ -575,6 +628,113 @@ void NoC::makeLinks()
   makeWiredLinks();
   makeWirelessLinks();
   makeGRSLinks();
+}
+
+// ----------------------------------------------------------------------
+
+int toggleKthBit(int n, int k) 
+      { 
+          return (n ^ (1 << (k-1))); 
+      } 
+
+int Id (int i , int j, int n)
+      {
+        int id = ((i)* (n/2)) + (j)+ n;
+        return id ;
+      }
+
+void NoC::makeDeltaLinks()
+{
+  links.clear();
+  
+  TLinkAttr lattr;
+  lattr.total_load = 0;
+  //lattr.ncomms = 0;
+
+ // Core2sw links
+  int n_delta_tiles = mesh_width * mesh_height; // n: number of tiles in butterfly 
+  int stg = log2(n_delta_tiles); // stg: stage number
+  int sw = n_delta_tiles/2; // sw: number of switche in each stage
+
+        for (int i = 0; i < sw ; i++)     
+               {  
+                pair<int,int> l(pair<int,int>((i*2),Id(0,i,n_delta_tiles)));
+                links[l] = lattr; 
+                pair<int,int> l1(pair<int,int>((i*2)+1,Id(0,i,n_delta_tiles)));
+                links[l1] = lattr;
+                //cout << i*2 << "->"  << Id(0,i,n_delta_tiles) << endl;
+                //cout << (i*2)+1 << "->"  << Id(0,i,n_delta_tiles) << endl;
+              }
+
+        for (int i = 0; i < sw ; i++)     
+               {
+                pair<int,int> l(pair<int,int>(Id(stg-1,i,n_delta_tiles),(i*2)));
+                links[l] = lattr; 
+                pair<int,int> l1(pair<int,int>(Id(stg-1,i,n_delta_tiles),((i*2)+1)));
+                links[l1] = lattr; 
+                  //cout << Id(stg-1,i,n_delta_tiles)<< "->"  << i*2 << endl;
+                  //cout << Id(stg-1,i,n_delta_tiles) << "->"  << (i*2)+1 << endl;
+                }
+// sw2sw links
+
+int d = 1; 
+        for (int i = 1; i < stg ; i++)    //stg
+      {
+        for (int j = 0; j < sw ; j++)     //sw
+        {
+          int m = toggleKthBit(j, stg-i);    // m: var to flipping bit
+          int r = sw/(pow(2,i));           // change every r
+          int x = j%r;
+
+          if (x==0) d = 1-d;
+          if (d==0)
+          {
+            if (i%2==0) //stage even
+            {
+               pair<int,int> l(pair<int,int>(Id(i-1,j,n_delta_tiles),Id(i,j,n_delta_tiles)));
+               links[l] = lattr; 
+               pair<int,int> l1(pair<int,int>(Id(i-1,m,n_delta_tiles),Id(i,j,n_delta_tiles)));
+               links[l1] = lattr; 
+             //cout << "switch "<< Id(i-1,j,n_delta_tiles) << " is connected to switch "<< Id(i,j,n_delta_tiles)<< endl;
+             //cout << "switch "<< Id(i-1,m,n_delta_tiles)<<" is connected to switch "<< Id(i,j,n_delta_tiles)<< endl;
+              
+            }
+
+            else
+            {
+                pair<int,int> l(pair<int,int>(Id(i-1,j,n_delta_tiles),Id(i,j,n_delta_tiles)));
+                links[l] = lattr; 
+                pair<int,int> l1(pair<int,int>(Id(i-1,m,n_delta_tiles),Id(i,j,n_delta_tiles)));
+                links[l1] = lattr; 
+              //cout << "switch "<< Id(i-1,j,n_delta_tiles)<<" is connected switch "<< Id(i,j,n_delta_tiles)<< endl;
+              //cout << "switch "<< Id(i-1,m,n_delta_tiles) << " is connected to switch "<< Id(i,j,n_delta_tiles)<< endl;
+            }
+
+          }
+          else  // d!=0
+          {
+            if (i%2==0) //stage even
+            {
+                pair<int,int> l(pair<int,int>(Id(i-1,j,n_delta_tiles),Id(i,j,n_delta_tiles)));
+                links[l] = lattr; 
+                pair<int,int> l1(pair<int,int>(Id(i-1,m,n_delta_tiles),Id(i,j,n_delta_tiles)));
+                links[l1] = lattr;
+              //cout << "switch "<< Id(i-1,j,n_delta_tiles) << " is connected switch "<< Id(i,j,n_delta_tiles)<< endl;
+              //cout << "switch "<< Id(i-1,m,n_delta_tiles)<< " is connected to switch "<< Id(i,j,n_delta_tiles) << endl;
+            }
+            else // stage not even
+            {
+                pair<int,int> l(pair<int,int>(Id(i-1,j,n_delta_tiles),Id(i,j,n_delta_tiles)));
+                links[l] = lattr; 
+                pair<int,int> l1(pair<int,int>(Id(i-1,m,n_delta_tiles),Id(i,j,n_delta_tiles)));
+                links[l1] = lattr;
+              //cout << "switch["<< Id(i-1,j,n_delta_tiles) << " is connected switch "<< Id(i,j,n_delta_tiles)<< endl;
+              //cout << "switch "<< Id(i-1,m,n_delta_tiles) << " is connected to switch "<< Id(i,j,n_delta_tiles)<< endl;
+            }
+          }
+}
+
+}
 }
 
 // ----------------------------------------------------------------------
@@ -777,9 +937,18 @@ void NoC::showNoC()
        << "NoC, Memory and PE" << endl
        << "==============================" << endl;
 
-  cout << "clock frequency: " << (clock_frequency/1e6) << " MHz" << endl
-       << "mesh size: " << mesh_width << "x" << mesh_height
-       << " (" << getNumberOfCores() << " cores, "
+  cout << "clock frequency: " << (clock_frequency/1e6) << " MHz" << endl;
+       if (topology == TOPOLOGY_MESH)
+       {
+         cout << "topology: mesh "  << endl
+         << "mesh size: " << mesh_width << "x" << mesh_height;
+       }
+       else 
+       {
+         cout << "topology: butterfly " << endl 
+         <<"n_delta_tiles: " << mesh_width * mesh_height;
+       }       
+       cout << " (" << getNumberOfCores() << " cores, "
        << getNumberOfMIs() << " memory interfaces)" << endl
        << "local memory size: " << (local_memory_size/1024) << " KB" << endl
        << "main memory bandwidth: " << (memory_bandwidth/1e9) << " GBps (" << getMainMemoryBandwidth() << " Bpc)" << endl
@@ -847,6 +1016,9 @@ void NoC::showNoC()
 
 void NoC::showTopology()
 {
+    if (topology != TOPOLOGY_MESH)
+     return;
+
   cout << endl
        << "Topology" << endl
        << "==============================" << endl;
@@ -893,6 +1065,8 @@ TPath NoC::getRoutingPath(int src_node, int dst_node)
     return getRoutingPathXY(src_node, dst_node);
   else if (routing == ROUTING_FA)
     return getRoutingPathFA(src_node, dst_node);
+  else if (routing == ROUTING_DELTA)
+    return getRoutingPathDELTA(src_node, dst_node);
   else    
     assert(true);
 
@@ -1104,6 +1278,103 @@ TPath NoC::getRoutingPathFA(int src_node, int dst_node)
 
 // ----------------------------------------------------------------------
 
+class Coord {
+  public:
+    int x;      // X coordinate
+    int y;      // Y coordinate
+
+    inline bool operator ==(const Coord & coord) const {
+  return (coord.x == x && coord.y == y);
+}};
+
+vector<int> Routing_DELTA(int current, int n_delta_tiles, int dst_id)
+{
+      vector <int> directions;
+
+      // first hop (core->1st stage)
+      if (current < n_delta_tiles)
+      {
+      directions.push_back(0); // for inputs cores
+      }
+        
+      else
+      { 
+      int destination = dst_id;
+      int currentStage = (current - n_delta_tiles)/ (int)(n_delta_tiles/2);
+      int shift_amount= log2(n_delta_tiles)-1-currentStage;
+      int direction = 1 & (destination >> shift_amount);
+      directions.push_back(direction);
+      }
+
+      return directions;
+}
+
+TPath NoC::getRoutingPathDELTA(int src_id, int dst_id)
+{
+  TPath path;
+  //pair<int,int> coord_s = node2coord(src_node);
+  //pair<int,int> coord_d = node2coord(dst_node);
+  int n_delta_tiles = mesh_width * mesh_height;
+  int current_node = src_id;
+
+  vector<int> direction; // initially is empty
+  vector<int> next_hops;
+
+  next_hops.push_back(src_id);
+
+  int sw = n_delta_tiles/2; //sw: switch number in each stage
+  int stg = log2(n_delta_tiles);
+
+  int c =  (current_node >>1);
+
+  Coord temp_coord;
+  temp_coord.x = 0;
+  temp_coord.y = c;
+  //int N = coord2Id(temp_coord);
+  int N = ((temp_coord.x) * (n_delta_tiles/2)) + (temp_coord.y) + (n_delta_tiles); 
+
+  next_hops.push_back(N);
+  current_node = N;
+
+  int current_stage = 0;
+
+  while (current_stage<stg-1)
+  {
+    Coord new_coord;
+  
+    int y = (current_node - n_delta_tiles)% (int)(n_delta_tiles/2);
+    direction = Routing_DELTA(current_node,n_delta_tiles,dst_id);
+
+    int bit_to_check = stg - current_stage - 1;
+    int bit_checked = (y & (1 << (bit_to_check - 1)))>0 ? 1:0;
+
+    // computes next node coords
+    new_coord.x = current_stage + 1;
+    if (bit_checked ^ direction[0])
+      new_coord.y = toggleKthBit(y, bit_to_check);
+    else
+      new_coord.y = y;
+
+    current_node = (new_coord.x  * (n_delta_tiles/2)) + new_coord.y + n_delta_tiles;
+    next_hops.push_back(current_node);
+    //current_stage = id2Coord(current_node).x;
+    current_stage = (current_node - n_delta_tiles)/ (int)(n_delta_tiles/2);  
+  }
+
+  next_hops.push_back(dst_id);
+ 
+  for(int i=0; i< next_hops.size()-1; i++)
+     {
+       //cout << "Links list = "<< next_hops[i] << "->" << next_hops[i+1] << endl;
+       path.push_back(pair<int,int>(next_hops[i],next_hops[i+1]));
+     } 
+  //return next_hops;
+  
+  return path;
+}
+
+// ----------------------------------------------------------------------
+
 void NoC::addCommunication(int src_node, int dst_node, long nbytes, int comm_id)
 {
   TPath path = getRoutingPath(src_node, dst_node);
@@ -1145,7 +1416,7 @@ double NoC::getBottleneckLinkCapacity(int src_node, int dst_node,
 	link_width / 8 : wireless_bandwidth / clock_frequency / 8; 
       */
       double link_capacity;
-      if (lattr.link_type == LT_WIRED)
+      if (lattr.link_type == LT_WIRED || topology == TOPOLOGY_BUTTERFLY)
 	link_capacity = link_width / 8;
       else if (lattr.link_type == LT_GRS)
 	link_capacity = grslink_width / 8;
@@ -1520,7 +1791,7 @@ void NoC::computeEnergyComm(double& e_wired,
     {
       TLinkAttr lattr = li->second;
 
-      if (lattr.link_type == LT_WIRED)
+      if (lattr.link_type == LT_WIRED || topology == TOPOLOGY_BUTTERFLY)
 	e_wired += lattr.total_load * 8 * (epb_link + epb_router);
       else if (lattr.link_type == LT_WIRELESS)
 	e_wireless += lattr.total_load * 8 * epb_wireless;
