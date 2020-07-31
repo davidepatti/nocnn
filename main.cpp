@@ -13,13 +13,14 @@ typedef struct CommandLine
   string cnn_filename;
   string noc_filename;
   string compression_filename;
+  string csvFile;
 } TCommandLine;
 
 // ----------------------------------------------------------------------
 
 void ShowCommandLineOptions(char* app_name)
 {
-  cerr << "Use " << app_name << " <cnn file name> <noc file name> [<weights compression rate file name>]" << endl;
+  cerr << "Use " << app_name << " <cnn file name> <noc file name> [<weights compression rate file name> -csv <out csv file name>]" << endl;
 }
 
 // ----------------------------------------------------------------------
@@ -37,9 +38,38 @@ TCommandLine ProcessCommandLine(int argc, char* argv[])
   cl.cnn_filename = string(argv[1]);
   cl.noc_filename = string(argv[2]);
 
-  if (argc == 4)
-    cl.compression_filename = string(argv[3]);
-  
+  if (argc == 4 && strcmp(argv[3], "-csv") != 0)
+    {   
+      cl.compression_filename = string(argv[3]);
+    }
+  else if (argc == 5 && strcmp(argv[3], "-csv") == 0)
+    {
+      cl.csvFile = string(argv[4]);
+    }
+  else if (argc == 6 && strcmp(argv[3], "-csv") == 0)
+    {
+        cl.csvFile = string(argv[4]);
+        cl.compression_filename = string(argv[5]);
+    }
+  else if (argc == 6 && strcmp(argv[4], "-csv") == 0)
+    {
+        cl.compression_filename = string(argv[3]);
+        cl.csvFile = string(argv[5]);
+    }
+  else if (argc > 3)
+    {
+      ShowCommandLineOptions(argv[0]);
+      exit(-1);
+    }
+
+  cout << "Command Line parameters: " << endl
+       << "* CNN: " << cl.cnn_filename << endl
+       << "* NoC: " << cl.noc_filename << endl
+       << "* Weights Compression rates: " << cl.compression_filename << endl
+       << "* CSV output: " << cl.csvFile << endl
+       << endl;
+
+
   return cl;
 }
 
@@ -91,6 +121,7 @@ int main(int argc, char* argv[])
   if (estimation.stime(stats))
     {
       estimation.showStats(stats);
+      estimation.saveCSV(stats, cl.csvFile);
     }
   else
     cerr << "Estimation failed!" << endl;

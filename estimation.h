@@ -1,6 +1,7 @@
 #ifndef __ESTIMATION_H__
 #define __ESTIMATION_H__
 
+#include <string>
 #include <vector>
 #include "noc.h"
 #include "cnn.h"
@@ -190,6 +191,8 @@ public:
   bool stime(TGlobalStats& stats);
 
   void showStats(TGlobalStats& stats);
+
+  void saveCSV(TGlobalStats& stats, const string &filename);
 
   NoC noc;
   CNN cnn;

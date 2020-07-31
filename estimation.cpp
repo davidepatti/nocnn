@@ -424,11 +424,11 @@ void Estimation::showStats(TGlobalStats& stats)
 
   cout << setw(16)  << "Layer"
        << setw(10)  << "Type"
-       << setw(30)  << "Latency (cycles)"
-       << setw(100) << "Energy (Joule)"
-       << setw(36)  << "Mem traffic (bytes)"
-       << setw(8)   << "Cores"
-       << setw(9)   << "OPs"
+       << setw(26)  << "Latency (cycles)"
+       << setw(74)  << "Energy (Joule)"
+       << setw(81)  << "Mem traffic (bytes)"
+       << setw(13)  << "Cores"
+       << setw(7)   << "OPs"
        << endl;
   
   cout << setw(16+10) << ""
@@ -507,4 +507,92 @@ void Estimation::showStats(TGlobalStats& stats)
        << endl;
 
   hline(229, '-');
+}
+
+void Estimation::saveCSV(TGlobalStats& stats, const string &filename)
+{
+  ofstream csvFile;
+  csvFile.open (filename);
+  csvFile << "Layer"
+          << "," << "Type"
+          << "," << "Latency (cycles)"
+          << ",,," << "Energy (Joule)"
+          << ",,,,,,,,,,,," << "Mem traffic (bytes)"
+          << ",,," << "Cores"
+          << "," << "OPs"
+          << endl;
+  
+  csvFile << ","
+          << "," << "Comm"
+          << "," << "Comp"
+          << "," << "MMem"
+          << "," << "Comm"
+          << "," << "CommLeak"
+          << "," << "Wireless"
+          << "," << "WiLeak"
+          << "," << "GRS"
+          << "," << "GRSLeak"
+          << "," << "Comp"
+          << "," << "CompLeak"
+          << "," << "LMem"
+          << "," << "LMemLeak"
+          << "," << "MMem"
+          << "," << "MMemLeak"
+          << "," << "Load W"
+          << "," << "Load IFM"
+          << "," << "Store OFM"
+          << "," << ""
+          << "," << "per core"
+          << endl;
+  
+  for (int l=0; l<cnn.layers.size(); l++)
+    {
+      csvFile << cnn.layers[l].lname
+	          << "," << cnn.ltype2str(cnn.layers[l].ltype)
+	          << "," << stats.layer_stats[l].comm_latency
+	          << "," << stats.layer_stats[l].comp_latency
+	          << "," << stats.layer_stats[l].mmem_latency
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].comm_wired_energy)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].comm_wired_energy_leakage)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].comm_wireless_energy)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].comm_wireless_energy_leakage)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].comm_grs_energy)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].comm_grs_energy_leakage)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].comp_energy)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].comp_energy_leakage)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].lmem_energy)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].lmem_energy_leakage)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].mmem_energy)
+	          << "," << DOUBLE_FORMAT(stats.layer_stats[l].mmem_energy_leakage)
+	          << "," << stats.layer_stats[l].main_memory_traffic_load_w
+	          << "," << stats.layer_stats[l].main_memory_traffic_load_ifm
+	          << "," << stats.layer_stats[l].main_memory_traffic_store_ofm
+	          << "," << stats.layer_stats[l].active_cores
+	          << "," << stats.layer_stats[l].ops_per_core
+	          << endl;
+    }
+
+  csvFile << ","
+          << "TOTAL"
+          << "," << stats.total_comm_latency
+          << "," << stats.total_comp_latency
+          << "," << stats.total_mmem_latency
+          << "," << DOUBLE_FORMAT(stats.total_comm_wired_energy)
+          << "," << DOUBLE_FORMAT(stats.total_comm_wired_energy_leakage)
+          << "," << DOUBLE_FORMAT(stats.total_comm_wireless_energy)
+          << "," << DOUBLE_FORMAT(stats.total_comm_wireless_energy_leakage)
+          << "," << DOUBLE_FORMAT(stats.total_comm_grs_energy)
+          << "," << DOUBLE_FORMAT(stats.total_comm_grs_energy_leakage)
+          << "," << DOUBLE_FORMAT(stats.total_comp_energy)
+          << "," << DOUBLE_FORMAT(stats.total_comp_energy_leakage)
+          << "," << DOUBLE_FORMAT(stats.total_lmem_energy)
+          << "," << DOUBLE_FORMAT(stats.total_lmem_energy_leakage)
+          << "," << DOUBLE_FORMAT(stats.total_mmem_energy)
+          << "," << DOUBLE_FORMAT(stats.total_mmem_energy_leakage)
+          << "," << stats.total_main_memory_traffic_load_w
+          << "," << stats.total_main_memory_traffic_load_ifm
+          << "," << stats.total_main_memory_traffic_store_ofm
+          << endl;
+
+  csvFile.close();
 }
